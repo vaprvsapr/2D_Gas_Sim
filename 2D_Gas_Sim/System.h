@@ -218,9 +218,7 @@ public:
 				}
 
 			}
-
 			window.display();
-
 		}
 	}
 };
