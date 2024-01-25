@@ -30,6 +30,13 @@ struct Vec2D
 		return { alpha * x, alpha * y };
 	}
 
+	void operator*=(const float alpha)
+	{
+		x *= alpha;
+		y *= alpha;
+		return;
+	}
+
 	Vec2D operator/(const float alpha) const
 	{
 		return {x / alpha, y / alpha };
@@ -57,5 +64,12 @@ struct Vec2D
 	Vec2D operator-(const Vec2D& other) const
 	{
 		return { x - other.x, y - other.y };
+	}
+
+	void operator-=(const Vec2D& other)
+	{
+		x -= other.x;
+		y -= other.y;
+		return;
 	}
 };
