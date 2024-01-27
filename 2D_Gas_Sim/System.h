@@ -4,6 +4,10 @@
 #include <iostream>
 #include <random>
 #include <chrono>
+#include <future>
+#include <sstream>
+#include <mutex>
+#include <set>
 
 #include "Object.h"
 #include "Pistol.h"
@@ -22,8 +26,9 @@ private:
 	const Vec2D system_size = { 1600, 900 };
 
 	Pistol pistol = {1000, system_size.y, 0, 0, false};
+	mutex pistol_position_mutex;
 
-	float dt = 0.1;
+	float dt = 0.1f;
 	size_t iteration = 0;
 	int collisions_cnt = 0;
 
@@ -37,6 +42,16 @@ private:
 
 	int number_of_visualized_objects = 1000;
 	size_t stop_iteration = -1;
+
+	float upper_wall_dimpulse = 0;
+	float left_wall_dimpulse = 0;
+	int pistol_iteration = 1;
+	mutex wall_dimpuls_mutex;
+
+	set<pair<float, float>> types_of_objects;
+
+
+
 
 	void MoveObjects()
 	{
@@ -59,13 +74,12 @@ private:
 			for (int j = 0; j < subregions_degree; j++)
 				subregions[i][j].clear();
 
+
 		// add references to subregions
 		for (int i = 0; i < objects.size(); i++)
 		{
-			
-			subregions[
-				int(subregions_degree * objects[i].position.x / pistol.position)][
-					int(subregions_degree * objects[i].position.y / system_size.y)].push_back(
+			subregions[int(subregions_degree * objects[i].position.x / pistol.position)][
+				int(subregions_degree * objects[i].position.y / system_size.y)].push_back(
 						&objects[i]
 					);
 		}
@@ -81,12 +95,16 @@ private:
 
 	void CollideWithWalls()
 	{
+		lock_guard<mutex> lock(wall_dimpuls_mutex);
+
 		for (int i = 0; i < objects.size(); i++)
 		{
 			if (objects[i].position.y < objects[i].radius)
 			{
 				objects[i].velocity.y *= -1;
 				objects[i].position.y = objects[i].radius + 1;
+
+				upper_wall_dimpulse += 2 * objects[i].mass * objects[i].velocity.y;
 			}
 
 			if (objects[i].position.y > system_size.y - objects[i].radius)
@@ -98,6 +116,8 @@ private:
 			{
 				objects[i].velocity.x *= -1;
 				objects[i].position.x = objects[i].radius + 1;
+
+				left_wall_dimpulse += 2 * objects[i].mass * objects[i].velocity.x;
 			}
 			if (objects[i].position.x > pistol.position - objects[i].radius)
 			{
@@ -117,8 +137,7 @@ private:
 	}
 
 	void CollideTwoIdenticalObjects(Object& lhs, Object& rhs)
-	{
-		
+	{	
 		Vec2D centers = rhs.position - lhs.position;
 		
 		if (centers.Abs() == 0)
@@ -133,7 +152,7 @@ private:
 		rhs.velocity = rhs_vel_perp + (rhs_vel_parallel*(rhs.mass - lhs.mass) + lhs_vel_parallel*2*lhs.mass)/(lhs.mass + rhs.mass);
 
 		float dradius = lhs.radius + rhs.radius;
-		centers *= dradius * 0.1;
+		centers *= dradius * 0.1f;
 		while ((rhs.position - lhs.position).Abs() < dradius)
 		{
 			rhs.position += centers;
@@ -166,11 +185,8 @@ private:
 								CollideTwoIdenticalObjects(*subregions[i][j][k], *subregions[i][j][l]);
 								collisions_cnt++;
 							}
-								
 				}
 			}
-
-						
 	}
 
 	float Energy()
@@ -221,6 +237,8 @@ public:
 
 	void GenerateGridObjects(Vec2D initial_point, Vec2D grid_size, int n, float mass, float radius, float initial_velocity)
 	{
+		types_of_objects.insert({ mass, radius });
+
 		srand(0);
 		for(int i = 0; i < n; i++)
 			for (int j = 0; j < n; j++)
@@ -230,7 +248,7 @@ public:
 					initial_point.y + grid_size.y / (n - 1) * j 
 				};
 
-				float phi = float(rand() % 10000) / 10000 * 2 * 3.141592;
+				float phi = float(rand() % 10000) / 10000 * 2 * 3.141592f;
 				Vec2D velocity = { 
 					initial_velocity * sin(phi),
 					initial_velocity * cos(phi)
@@ -238,6 +256,40 @@ public:
 
 				AddObject({ mass, radius, position, velocity });
 			}
+	}
+
+	void ExecuteCommand()
+	{
+		while (true)
+		{
+			string command;
+			cin >> command;
+
+
+			if (command == "get_energy")
+			{
+				cout << Energy() << endl;
+				continue;
+			}
+			if (command == "set_pistol_pos")
+			{
+				cout << "new pistol.position: ";
+				float pos;
+				cin >> pos;
+				lock_guard<mutex> lock(pistol_position_mutex);
+				pistol.position = pos;
+				cout << "pistol.position set to " << pistol.position << " successfully" << endl;
+				pistol_iteration = 0;
+				left_wall_dimpulse = 0;
+				upper_wall_dimpulse = 0;
+			}
+			if (command == "get_pressure")
+			{
+				cout << "left wall pressure: " << left_wall_dimpulse / dt / system_size.y / pistol_iteration << endl;
+				cout << "uppper wall pressure: " << upper_wall_dimpulse / dt / pistol.position / pistol_iteration << endl;
+			}
+			
+		}
 	}
 
 	void Run()
@@ -250,6 +302,10 @@ public:
 		shape.setFillColor(sf::Color::White);
 		pistol_shape.setFillColor(sf::Color::White);
 
+
+		future<void> execute_command_thread = async([this] {ExecuteCommand(); });
+
+
 		while (window.isOpen())
 		{
 			sf::Event event;
@@ -260,6 +316,7 @@ public:
 			}
 
 			iteration++;
+			pistol_iteration++;
 			/*cout << "iteration: " << iteration << '\n';*/
 
 			if (iteration == stop_iteration)
@@ -276,6 +333,10 @@ public:
 				break;
 			}
 
+
+
+
+			// visualization
 			if(iteration % 10 == 0)
 			{
 				chrono::steady_clock::time_point start = chrono::steady_clock::now();
@@ -297,12 +358,85 @@ public:
 
 				visualize_time += chrono::duration_cast<milliseconds>(chrono::steady_clock::now() - start).count();
 
+				shape.setFillColor(sf::Color::White);
+				// drawing dist hist
+				{
+					sf::Vector2f hist_size = { 400, 200 };
+					sf::Vector2f hist_offset = { 1100, 100 };
+
+					int n = 100;
+
+					sf::RectangleShape rectangle({ hist_size.x / n, hist_size.y });
+
+					float max_vel = 0;
+					for (int i = 0; i < objects.size(); i++)
+						if (objects[i].velocity.Abs() > max_vel)
+							max_vel = objects[i].velocity.Abs();
+
+					max_vel += 0.001f;
+					max_vel = 5;
+					vector<int> columns;
+					columns.resize(n);
+					map<pair<float, float>, vector<int>> object_type_cnt;
+
+					{
+						vector<int> vec(n);
+						for (const auto& type_of_object : types_of_objects)
+						{
+							object_type_cnt.insert({ type_of_object, vec });
+						}
+					}
+
+
+					for (int i = 0; i < objects.size(); i++)
+					{
+						columns[int(objects[i].velocity.Abs() / max_vel * n) > (n - 1) ? n-1 : int(objects[i].velocity.Abs() / max_vel * n)]++;
+						object_type_cnt.at({objects[i].mass, objects[i].radius})
+							[int(objects[i].velocity.Abs() / max_vel * n) > (n - 1) ? n - 1 : int(objects[i].velocity.Abs() / max_vel * n)]++;
+					}
+
+					int columns_max = 0;
+					for (int i = 0; i < n; i++)
+						if (columns[i] > columns_max)
+							columns_max = columns[i];
+
+					float background_width = 20;
+					rectangle.setSize({ hist_size.x + background_width, hist_size.y + background_width });
+					rectangle.setPosition({ hist_offset.x - background_width / 2, hist_offset.y - background_width / 2 });
+					window.draw(rectangle);
+					rectangle.setFillColor(sf::Color::Black);
+					rectangle.setSize({ hist_size.x + background_width / 2, hist_size.y + background_width / 2 });
+					rectangle.setPosition({ hist_offset.x - background_width / 4, hist_offset.y - background_width / 4 });
+					window.draw(rectangle);
+					rectangle.setFillColor(sf::Color::White);
+
+					shape.setRadius(1);
+					shape.setFillColor(sf::Color::Red);
+
+					for (int i = 0; i < n; i++)
+					{
+						rectangle.setSize({ hist_size.x / n, hist_size.y / columns_max * columns[i] });
+						rectangle.setPosition({i * hist_size.x / n + hist_offset.x, hist_offset.y + hist_size.y - hist_size.y / columns_max * columns[i] });
+						window.draw(rectangle);
+
+						for (const auto& cnt : object_type_cnt)
+						{
+							shape.setPosition({ i * hist_size.x / n + hist_offset.x, hist_offset.y + hist_size.y - hist_size.y / columns_max * cnt.second[i]});
+							window.draw(shape);
+						}
+					}
+
+
+
+				}
+
 				window.display();
 			}
 			
 
 			// performing calculations
 			{
+				lock_guard<mutex> lock(pistol_position_mutex);
 				{
 					chrono::steady_clock::time_point start = chrono::steady_clock::now();
 					MoveObjects();
@@ -326,11 +460,8 @@ public:
 					CollideObjectsInSubregions();
 					collide_objects_time += chrono::duration_cast<milliseconds>(chrono::steady_clock::now() - start).count();
 				}
-
-				if (iteration % 10 == 0)
-					cout << "E: " << Energy() << endl;
 			}
-
 		}
+		execute_command_thread.get();
 	}
 };
