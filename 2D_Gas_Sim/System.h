@@ -152,7 +152,7 @@ private:
 		rhs.velocity = rhs_vel_perp + (rhs_vel_parallel*(rhs.mass - lhs.mass) + lhs_vel_parallel*2*lhs.mass)/(lhs.mass + rhs.mass);
 
 		float dradius = lhs.radius + rhs.radius;
-		centers *= dradius * 0.1f;
+		centers *= dradius * 0.01f;
 		while ((rhs.position - lhs.position).Abs() < dradius)
 		{
 			rhs.position += centers;
